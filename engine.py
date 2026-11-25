@@ -7,7 +7,7 @@ import requests
 
 @st.cache_data(ttl=86400)
 def load_german_data():
-    seasons = [2024, 2025, 2026]
+    seasons = ["2024", "2025", "2026"]
     leagues = [("bl1", "Bundesliga", 1), ("bl2", "2. Bundesliga", 2)]
     rows = []
 
