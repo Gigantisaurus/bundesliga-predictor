@@ -3,50 +3,48 @@ import pandas as pd
 import numpy as np
 from scipy.optimize import minimize
 from scipy.stats import poisson
-import requests
+import urllib.request
+import ssl
+import io
 
 @st.cache_data(ttl=86400)
-def load_german_data(cache_ver=3):
-    seasons = ["2024-25", "2025-26", "2026-27"]
-    leagues = [("de.1", "Bundesliga", 1), ("de.2", "2. Bundesliga", 2)]
-    rows = []
+def load_german_data(cache_ver=4):
+    seasons = ["2425", "2526", "2627"]
+    leagues = [("D1", "Bundesliga", 1), ("D2", "2. Bundesliga", 2)]
+    frames = []
+    errors = []
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
 
     for s in seasons:
         for code, name, tier in leagues:
-            url = f"https://githubusercontent.com{s}/{code}.json"
+            url = f"https://football-data.co.uk{s}/{code}.csv"
             try:
-                r = requests.get(url, timeout=15)
-                if r.status_code == 200:
-                    data = r.json()
-                    for m in data.get("matches", []):
-                        score = m.get("score", {})
-                        ft = score.get("ft")
-                        ht = score.get("ht")
-                        if ft and len(ft) == 2:
-                            # Fallback if HT is missing on an older fixture: ~44% of FT goals
-                            if not ht or len(ht) != 2:
-                                ht = [round(ft * 0.44), round(ft * 0.44)]
-                            rows.append({
-                                "Date": m["date"],
-                                "HomeTeam": m["team1"],
-                                "AwayTeam": m["team2"],
-                                "HTHG": int(ht),
-                                "HTAG": int(ht),
-                                "FTHG": int(ft),
-                                "FTAG": int(ft),
-                                "League": name,
-                                "Tier": tier
-                            })
-            except Exception:
-                continue
+                req = urllib.request.Request(
+                    url,
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+                )
+                with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
+                    raw_text = resp.read().decode("latin1")
+                df = pd.read_csv(io.StringIO(raw_text))
+                req_cols = ["Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "HTHG", "HTAG"]
+                if all(c in df.columns for c in req_cols):
+                    df = df[req_cols].dropna()
+                    df["League"] = name
+                    df["Tier"] = tier
+                    df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
+                    df = df.dropna(subset=["Date"])
+                    frames.append(df)
+            except Exception as e:
+                errors.append(f"{s}/{code}: {e}")
 
-    if not rows:
-        st.error("Unable to fetch GitHub football data.")
+    if not frames:
+        st.error(f"Data fetch failed. Details: {errors[:2]}")
         st.stop()
 
-    full_df = pd.DataFrame(rows)
-    full_df["Date"] = pd.to_datetime(full_df["Date"], errors="coerce")
-    full_df = full_df.dropna(subset=["Date"])
+    full_df = pd.concat(frames, ignore_index=True)
     full_df["SHHG"] = (full_df["FTHG"] - full_df["HTHG"]).clip(lower=0)
     full_df["SHAG"] = (full_df["FTAG"] - full_df["HTAG"]).clip(lower=0)
 
