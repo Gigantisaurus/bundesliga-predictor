@@ -6,16 +6,17 @@ from scipy.stats import poisson
 import requests
 
 @st.cache_data(ttl=86400)
-def load_german_data():
+def load_german_data(cache_ver=2):
     seasons = ["2024", "2025", "2026"]
     leagues = [("bl1", "Bundesliga", 1), ("bl2", "2. Bundesliga", 2)]
     rows = []
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; BundesligaPredictor/1.0)"}
 
     for s in seasons:
         for code, name, tier in leagues:
             url = f"https://openligadb.de{code}/{s}"
             try:
-                r = requests.get(url, timeout=15)
+                r = requests.get(url, headers=headers, timeout=15)
                 if r.status_code == 200:
                     matches = r.json()
                     for m in matches:
@@ -24,9 +25,13 @@ def load_german_data():
                         results = m.get("matchResults", [])
                         ht_res = next((x for x in results if x.get("resultTypeID") == 1), None)
                         ft_res = next((x for x in results if x.get("resultTypeID") == 2), None)
+                        if not ft_res and results:
+                            ft_res = sorted(results, key=lambda x: x.get("resultOrderID", 0))[-1]
+                        if not ht_res and len(results) >= 2:
+                            ht_res = sorted(results, key=lambda x: x.get("resultOrderID", 0))
                         if ht_res and ft_res:
-                            h_team = m["team1"]["shortName"] or m["team1"]["teamName"]
-                            a_team = m["team2"]["shortName"] or m["team2"]["teamName"]
+                            h_team = m["team1"].get("shortName") or m["team1"].get("teamName")
+                            a_team = m["team2"].get("shortName") or m["team2"].get("teamName")
                             rows.append({
                                 "Date": m["matchDateTimeUTC"],
                                 "HomeTeam": h_team,
@@ -40,6 +45,10 @@ def load_german_data():
                             })
             except Exception:
                 continue
+
+    if not rows:
+        st.error("Could not reach OpenLigaDB API. Check network or API status.")
+        st.stop()
 
     full_df = pd.DataFrame(rows)
     full_df["Date"] = pd.to_datetime(full_df["Date"], errors="coerce")
