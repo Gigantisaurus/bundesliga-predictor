@@ -87,13 +87,15 @@ if st.button("⚽ Predict Match Outcomes", type="primary", use_container_width=T
 
         best_ht = np.unravel_index(np.argmax(mat_1h), mat_1h.shape)
         best_ft = np.unravel_index(np.argmax(ft_mat), ft_mat.shape)
+        ht_h, ht_a = best_ht
+        ft_h, ft_a = best_ft
 
         st.markdown("---")
         st.subheader(f"📊 {home_team} vs {away_team}")
 
         m1, m2, m3 = st.columns(3)
-        m1.metric("Most Likely Full-Time Score", f"{best_ft} - {best_ft}", f"{ft_mat[best_ft]:.1%} chance")
-        m2.metric("Most Likely Half-Time Score", f"{best_ht} - {best_ht}", f"{mat_1h[best_ht]:.1%} chance")
+        m1.metric("Most Likely Full-Time Score", f"{int(ft_h)} - {int(ft_a)}", f"{ft_mat[best_ft]:.1%} chance")
+        m2.metric("Most Likely Half-Time Score", f"{int(ht_h)} - {int(ht_a)}", f"{mat_1h[best_ht]:.1%} chance")
         m3.metric("Expected Goals Split (H - A)", f"{lam_1h+lam_2h:.2f} - {mu_1h+mu_2h:.2f}", f"1H: {lam_1h:.2f}-{mu_1h:.2f} | 2H: {lam_2h:.2f}-{mu_2h:.2f}")
 
         c1, c2 = st.columns(2)
@@ -123,14 +125,14 @@ if st.button("⚽ Predict Match Outcomes", type="primary", use_container_width=T
             for idx in flat_indices:
                 r, c = divmod(idx, 10)
                 p = ft_mat[r, c]
-                score_rows.append((f"{r} - {c}", f"{p:.1%}", f"{1/max(p,0.001):.2f}"))
+                score_rows.append((f"{int(r)} - {int(c)}", f"{p:.1%}", f"{1/max(p,0.001):.2f}"))
             st.dataframe(pd.DataFrame(score_rows, columns=["Scoreline", "Probability", "Fair Odds"]), hide_index=True, use_container_width=True)
 
         with c4:
             st.markdown("#### 🔀 Half-Time / Full-Time (All 9 Combos)")
-            sorted_htft = sorted(ht_ft_probs.items(), key=lambda x: x, reverse=True)
+            ranked_htft = sorted([(p, label) for label, p in ht_ft_probs.items()], reverse=True)
             htft_rows = []
-            for label, p in sorted_htft:
+            for p, label in ranked_htft:
                 htft_rows.append((label, f"{p:.1%}", f"{1/max(p,0.001):.2f}"))
             st.dataframe(pd.DataFrame(htft_rows, columns=["HT / FT", "Probability", "Fair Odds"]), hide_index=True, use_container_width=True)
 
