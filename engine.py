@@ -3,34 +3,47 @@ import pandas as pd
 import numpy as np
 from scipy.optimize import minimize
 from scipy.stats import poisson
-import io
 import requests
 
 @st.cache_data(ttl=86400)
 def load_german_data():
-    seasons = ["2425", "2526", "2627"]
-    leagues = [("D1", "Bundesliga"), ("D2", "2. Bundesliga")]
-    frames = []
-    headers = {"User-Agent": "Mozilla/5.0"}
+    seasons = [2024, 2025, 2026]
+    leagues = [("bl1", "Bundesliga", 1), ("bl2", "2. Bundesliga", 2)]
+    rows = []
+
     for s in seasons:
-        for code, name in leagues:
-            url = f"https://football-data.co.uk{s}/{code}.csv"
+        for code, name, tier in leagues:
+            url = f"https://openligadb.de{code}/{s}"
             try:
-                r = requests.get(url, headers=headers, timeout=10)
+                r = requests.get(url, timeout=15)
                 if r.status_code == 200:
-                    df = pd.read_csv(io.StringIO(r.text))
-                    req_cols = ["Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "HTHG", "HTAG"]
-                    if all(c in df.columns for c in req_cols):
-                        df = df[req_cols].dropna()
-                        df["League"] = name
-                        df["Tier"] = 1 if code == "D1" else 2
-                        df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
-                        df = df.dropna(subset=["Date"])
-                        frames.append(df)
+                    matches = r.json()
+                    for m in matches:
+                        if not m.get("matchIsFinished"):
+                            continue
+                        results = m.get("matchResults", [])
+                        ht_res = next((x for x in results if x.get("resultTypeID") == 1), None)
+                        ft_res = next((x for x in results if x.get("resultTypeID") == 2), None)
+                        if ht_res and ft_res:
+                            h_team = m["team1"]["shortName"] or m["team1"]["teamName"]
+                            a_team = m["team2"]["shortName"] or m["team2"]["teamName"]
+                            rows.append({
+                                "Date": m["matchDateTimeUTC"],
+                                "HomeTeam": h_team,
+                                "AwayTeam": a_team,
+                                "HTHG": int(ht_res["pointsTeam1"]),
+                                "HTAG": int(ht_res["pointsTeam2"]),
+                                "FTHG": int(ft_res["pointsTeam1"]),
+                                "FTAG": int(ft_res["pointsTeam2"]),
+                                "League": name,
+                                "Tier": tier
+                            })
             except Exception:
                 continue
 
-    full_df = pd.concat(frames, ignore_index=True)
+    full_df = pd.DataFrame(rows)
+    full_df["Date"] = pd.to_datetime(full_df["Date"], errors="coerce")
+    full_df = full_df.dropna(subset=["Date"])
     full_df["SHHG"] = (full_df["FTHG"] - full_df["HTHG"]).clip(lower=0)
     full_df["SHAG"] = (full_df["FTAG"] - full_df["HTAG"]).clip(lower=0)
 
