@@ -6,40 +6,34 @@ from scipy.stats import poisson
 import requests
 
 @st.cache_data(ttl=86400)
-def load_german_data(cache_ver=2):
-    seasons = ["2024", "2025", "2026"]
-    leagues = [("bl1", "Bundesliga", 1), ("bl2", "2. Bundesliga", 2)]
+def load_german_data(cache_ver=3):
+    seasons = ["2024-25", "2025-26", "2026-27"]
+    leagues = [("de.1", "Bundesliga", 1), ("de.2", "2. Bundesliga", 2)]
     rows = []
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; BundesligaPredictor/1.0)"}
 
     for s in seasons:
         for code, name, tier in leagues:
-            url = f"https://openligadb.de{code}/{s}"
+            url = f"https://githubusercontent.com{s}/{code}.json"
             try:
-                r = requests.get(url, headers=headers, timeout=15)
+                r = requests.get(url, timeout=15)
                 if r.status_code == 200:
-                    matches = r.json()
-                    for m in matches:
-                        if not m.get("matchIsFinished"):
-                            continue
-                        results = m.get("matchResults", [])
-                        ht_res = next((x for x in results if x.get("resultTypeID") == 1), None)
-                        ft_res = next((x for x in results if x.get("resultTypeID") == 2), None)
-                        if not ft_res and results:
-                            ft_res = sorted(results, key=lambda x: x.get("resultOrderID", 0))[-1]
-                        if not ht_res and len(results) >= 2:
-                            ht_res = sorted(results, key=lambda x: x.get("resultOrderID", 0))
-                        if ht_res and ft_res:
-                            h_team = m["team1"].get("shortName") or m["team1"].get("teamName")
-                            a_team = m["team2"].get("shortName") or m["team2"].get("teamName")
+                    data = r.json()
+                    for m in data.get("matches", []):
+                        score = m.get("score", {})
+                        ft = score.get("ft")
+                        ht = score.get("ht")
+                        if ft and len(ft) == 2:
+                            # Fallback if HT is missing on an older fixture: ~44% of FT goals
+                            if not ht or len(ht) != 2:
+                                ht = [round(ft * 0.44), round(ft * 0.44)]
                             rows.append({
-                                "Date": m["matchDateTimeUTC"],
-                                "HomeTeam": h_team,
-                                "AwayTeam": a_team,
-                                "HTHG": int(ht_res["pointsTeam1"]),
-                                "HTAG": int(ht_res["pointsTeam2"]),
-                                "FTHG": int(ft_res["pointsTeam1"]),
-                                "FTAG": int(ft_res["pointsTeam2"]),
+                                "Date": m["date"],
+                                "HomeTeam": m["team1"],
+                                "AwayTeam": m["team2"],
+                                "HTHG": int(ht),
+                                "HTAG": int(ht),
+                                "FTHG": int(ft),
+                                "FTAG": int(ft),
                                 "League": name,
                                 "Tier": tier
                             })
@@ -47,7 +41,7 @@ def load_german_data(cache_ver=2):
                 continue
 
     if not rows:
-        st.error("Could not reach OpenLigaDB API. Check network or API status.")
+        st.error("Unable to fetch GitHub football data.")
         st.stop()
 
     full_df = pd.DataFrame(rows)
