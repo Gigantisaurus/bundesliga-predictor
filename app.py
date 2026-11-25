@@ -6,7 +6,7 @@ from engine import load_german_data, fit_dixon_coles, score_matrix
 st.set_page_config(page_title="German Football DC Predictor", page_icon="⚽", layout="wide")
 
 st.title("🇩🇪 Bundesliga & 2. Bundesliga Score Predictor")
-st.caption("Two-Half Dixon-Coles Model • Accounts for 1st/2nd Half Team Profiles, Time Decay & Tier Strength")
+st.caption("Shot-Proxy xG Blended (60/40) • Two-Half Dixon-Coles Model • Tier & Time-Decay Adjusted")
 
 with st.sidebar:
     st.header("⚙️ Controls")
@@ -14,14 +14,14 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
     st.markdown("---")
-    st.write("**How it works:**")
-    st.write("• Models **1st Half** and **2nd Half** attack/defence profiles separately.")
-    st.write("• Combines both halves to calculate **FT**, **HT**, and **HT/FT** double odds.")
+    st.write("**Model Features:**")
+    st.write("• **60/40 xG Blend:** Combines Shot-Proxy xG with actual goals to filter finishing luck.")
+    st.write("• **Two-Half Grids:** Separate 1st-half and 2nd-half ratings for HT, FT & HT/FT odds.")
 
-with st.spinner("Loading German league data & calibrating 1st/2nd half models..."):
+with st.spinner("Loading German league data & calibrating xG-blended models..."):
     df, d1_teams, d2_teams = load_german_data()
-    model_1h = fit_dixon_coles(df, "HTHG", "HTAG")
-    model_2h = fit_dixon_coles(df, "SHHG", "SHAG")
+    model_1h = fit_dixon_coles(df, "BLEND_1H_H", "BLEND_1H_A", "HTHG", "HTAG")
+    model_2h = fit_dixon_coles(df, "BLEND_2H_H", "BLEND_2H_A", "SHHG", "SHAG")
 
 comp = st.radio(
     "Select Competition:",
@@ -85,6 +85,12 @@ if st.button("⚽ Predict Match Outcomes", type="primary", use_container_width=T
         ft_draw = np.sum(np.trace(ft_mat))
         ft_away = np.sum(np.triu(ft_mat, 1))
 
+        # Over/Under 2.5 Goals & BTTS probabilities
+        over_25 = sum(ft_mat[r, c] for r in range(10) for c in range(10) if (r + c) >= 3)
+        under_25 = 1.0 - over_25
+        btts_yes = sum(ft_mat[r, c] for r in range(1, 10) for c in range(1, 10))
+        btts_no = 1.0 - btts_yes
+
         best_ht = np.unravel_index(np.argmax(mat_1h), mat_1h.shape)
         best_ft = np.unravel_index(np.argmax(ft_mat), ft_mat.shape)
         ht_h, ht_a = best_ht
@@ -96,9 +102,9 @@ if st.button("⚽ Predict Match Outcomes", type="primary", use_container_width=T
         m1, m2, m3 = st.columns(3)
         m1.metric("Most Likely Full-Time Score", f"{int(ft_h)} - {int(ft_a)}", f"{ft_mat[best_ft]:.1%} chance")
         m2.metric("Most Likely Half-Time Score", f"{int(ht_h)} - {int(ht_a)}", f"{mat_1h[best_ht]:.1%} chance")
-        m3.metric("Expected Goals Split (H - A)", f"{lam_1h+lam_2h:.2f} - {mu_1h+mu_2h:.2f}", f"1H: {lam_1h:.2f}-{mu_1h:.2f} | 2H: {lam_2h:.2f}-{mu_2h:.2f}")
+        m3.metric("Blended xG Split (H - A)", f"{lam_1h+lam_2h:.2f} - {mu_1h+mu_2h:.2f}", f"1H: {lam_1h:.2f}-{mu_1h:.2f} | 2H: {lam_2h:.2f}-{mu_2h:.2f}")
 
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         with c1:
             st.markdown("#### ⏱️ Full-Time Result (90 Mins)")
             ft_rows = [
@@ -117,8 +123,18 @@ if st.button("⚽ Predict Match Outcomes", type="primary", use_container_width=T
             ]
             st.dataframe(pd.DataFrame(ht_rows, columns=["Outcome", "Probability", "Fair Odds"]), hide_index=True, use_container_width=True)
 
-        c3, c4 = st.columns(2)
         with c3:
+            st.markdown("#### 🔥 Goals & BTTS Markets")
+            goal_rows = [
+                ("Over 2.5 Goals", f"{over_25:.1%}", f"{1/max(over_25,0.001):.2f}"),
+                ("Under 2.5 Goals", f"{under_25:.1%}", f"{1/max(under_25,0.001):.2f}"),
+                ("BTTS - Yes", f"{btts_yes:.1%}", f"{1/max(btts_yes,0.001):.2f}"),
+                ("BTTS - No", f"{btts_no:.1%}", f"{1/max(btts_no,0.001):.2f}")
+            ]
+            st.dataframe(pd.DataFrame(goal_rows, columns=["Market", "Probability", "Fair Odds"]), hide_index=True, use_container_width=True)
+
+        c4, c5 = st.columns(2)
+        with c4:
             st.markdown("#### 🎯 Top 6 Most Likely FT Scorelines")
             flat_indices = np.argsort(ft_mat.ravel())[::-1][:6]
             score_rows = []
@@ -128,7 +144,7 @@ if st.button("⚽ Predict Match Outcomes", type="primary", use_container_width=T
                 score_rows.append((f"{int(r)} - {int(c)}", f"{p:.1%}", f"{1/max(p,0.001):.2f}"))
             st.dataframe(pd.DataFrame(score_rows, columns=["Scoreline", "Probability", "Fair Odds"]), hide_index=True, use_container_width=True)
 
-        with c4:
+        with c5:
             st.markdown("#### 🔀 Half-Time / Full-Time (All 9 Combos)")
             ranked_htft = sorted([(p, label) for label, p in ht_ft_probs.items()], reverse=True)
             htft_rows = []
