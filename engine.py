@@ -3,45 +3,31 @@ import pandas as pd
 import numpy as np
 from scipy.optimize import minimize
 from scipy.stats import poisson
-import urllib.request
-import ssl
-import io
+import glob
+import os
 
 @st.cache_data(ttl=86400)
-def load_german_data(cache_ver=4):
-    seasons = ["2425", "2526", "2627"]
-    leagues = [("D1", "Bundesliga", 1), ("D2", "2. Bundesliga", 2)]
+def load_german_data(cache_ver=5):
+    csv_files = glob.glob("*.csv")
     frames = []
-    errors = []
 
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
-    for s in seasons:
-        for code, name, tier in leagues:
-            url = f"https://football-data.co.uk{s}/{code}.csv"
-            try:
-                req = urllib.request.Request(
-                    url,
-                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-                )
-                with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
-                    raw_text = resp.read().decode("latin1")
-                df = pd.read_csv(io.StringIO(raw_text))
-                req_cols = ["Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "HTHG", "HTAG"]
-                if all(c in df.columns for c in req_cols):
-                    df = df[req_cols].dropna()
-                    df["League"] = name
-                    df["Tier"] = tier
-                    df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
-                    df = df.dropna(subset=["Date"])
-                    frames.append(df)
-            except Exception as e:
-                errors.append(f"{s}/{code}: {e}")
+    for f in csv_files:
+        try:
+            df = pd.read_csv(f, encoding="latin1")
+            req_cols = ["Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "HTHG", "HTAG"]
+            if all(c in df.columns for c in req_cols):
+                df = df[req_cols].dropna()
+                fname = os.path.basename(f).upper()
+                tier = 2 if "D2" in fname else 1
+                df["Tier"] = tier
+                df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
+                df = df.dropna(subset=["Date"])
+                frames.append(df)
+        except Exception:
+            continue
 
     if not frames:
-        st.error(f"Data fetch failed. Details: {errors[:2]}")
+        st.error("No CSV files found in repository! Upload D1_2526.csv, D2_2526.csv, D1_2627.csv, D2_2627.csv to GitHub.")
         st.stop()
 
     full_df = pd.concat(frames, ignore_index=True)
